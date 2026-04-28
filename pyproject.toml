@@ -19,3 +19,6 @@ can_isolate = true
 share_torch = false
 package_manager = "uv"
 execution_model = "sealed_worker"
+
+[tool.setuptools]
+py-modules = ["nodes"]
