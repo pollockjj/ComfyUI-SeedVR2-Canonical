@@ -12,6 +12,7 @@ dependencies = [
   "transformers==4.38.2",
   "torchvision==0.18.0",
   "mediapy==1.2.0",
+  "flash_attn==2.5.9.post1",
   "pyisolate==0.10.2",
 ]
 
