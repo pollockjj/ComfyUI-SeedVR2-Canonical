@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import shutil
@@ -76,7 +77,15 @@ class SeedVR2Canonical:
             str(resolution),
         ]
 
-        subprocess.run(command, cwd=str(SEEDVR_ROOT), check=True)
+        env = os.environ.copy()
+        existing_pythonpath = env.get("PYTHONPATH")
+        env["PYTHONPATH"] = (
+            str(SEEDVR_ROOT)
+            if not existing_pythonpath
+            else f"{SEEDVR_ROOT}{os.pathsep}{existing_pythonpath}"
+        )
+
+        subprocess.run(command, cwd=str(SEEDVR_ROOT), env=env, check=True)
         output_path = output_dir / input_path.name
         if not output_path.exists():
             raise FileNotFoundError(f"SeedVR2 did not produce expected output: {output_path}")
