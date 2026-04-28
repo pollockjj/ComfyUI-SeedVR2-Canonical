@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import shutil
 from pathlib import Path
 
 
@@ -25,6 +26,7 @@ class SeedVR2Canonical:
     RETURN_NAMES = ("output_video",)
     FUNCTION = "run"
     CATEGORY = "video/upscale"
+    OUTPUT_NODE = True
 
     @staticmethod
     def _entrypoint(model_size: str) -> Path:
@@ -54,12 +56,16 @@ class SeedVR2Canonical:
 
         output_dir = self._output_dir()
         output_dir.mkdir(parents=True, exist_ok=True)
+        staged_input_dir = output_dir / "inputs"
+        staged_input_dir.mkdir(parents=True, exist_ok=True)
+        staged_input = staged_input_dir / input_path.name
+        shutil.copy2(input_path, staged_input)
 
         command = [
             sys.executable,
             str(entrypoint),
             "--video_path",
-            str(input_path.parent),
+            str(staged_input_dir),
             "--output_dir",
             str(output_dir),
             "--seed",
