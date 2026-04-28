@@ -1,0 +1,21 @@
+[project]
+name = "comfyui-seedvr2-canonical"
+version = "0.1.0"
+dependencies = [
+  "einops==0.7.0",
+  "torch==2.3.0",
+  "omegaconf==2.3.0",
+  "opencv-python==4.9.0.80",
+  "diffusers==0.29.1",
+  "rotary-embedding-torch==0.5.3",
+  "transformers==4.38.2",
+  "torchvision==0.18.0",
+  "mediapy==1.2.0",
+  "pyisolate==0.10.2",
+]
+
+[tool.comfy.isolation]
+can_isolate = true
+share_torch = false
+package_manager = "uv"
+execution_model = "sealed_worker"
