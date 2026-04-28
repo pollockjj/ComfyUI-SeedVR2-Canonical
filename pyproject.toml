@@ -6,6 +6,7 @@ dependencies = [
   "torch==2.3.0",
   "omegaconf==2.3.0",
   "opencv-python==4.9.0.80",
+  "numpy<2",
   "diffusers==0.29.1",
   "rotary-embedding-torch==0.5.3",
   "transformers==4.38.2",
