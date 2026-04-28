@@ -3,24 +3,27 @@ name = "comfyui-seedvr2-canonical"
 version = "0.1.0"
 dependencies = [
   "einops==0.7.0",
-  "torch==2.3.0",
+  "torch @ https://download.pytorch.org/whl/cu121/torch-2.4.0%2Bcu121-cp310-cp310-linux_x86_64.whl",
   "omegaconf==2.3.0",
   "opencv-python==4.9.0.80",
   "numpy<2",
-  "diffusers==0.29.1",
+  "diffusers==0.33.1",
   "rotary-embedding-torch==0.5.3",
-  "transformers==4.38.2",
-  "torchvision==0.18.0",
+  "transformers==4.46.3",
+  "torchvision @ https://download.pytorch.org/whl/cu121/torchvision-0.19.0%2Bcu121-cp310-cp310-linux_x86_64.whl",
   "mediapy==1.2.0",
-  "flash-attn @ https://github.com/Dao-AILab/flash-attention/releases/download/v2.5.9.post1/flash_attn-2.5.9.post1%2Bcu122torch2.3cxx11abiFALSE-cp312-cp312-linux_x86_64.whl",
+  "apex @ https://huggingface.co/ByteDance-Seed/SeedVR2-3B/resolve/main/apex-0.1-cp310-cp310-linux_x86_64.whl",
+  "flash-attn @ https://github.com/Dao-AILab/flash-attention/releases/download/v2.5.9.post1/flash_attn-2.5.9.post1%2Bcu122torch2.4cxx11abiFALSE-cp310-cp310-linux_x86_64.whl",
   "pyisolate==0.10.2",
 ]
 
 [tool.comfy.isolation]
 can_isolate = true
 share_torch = false
-package_manager = "uv"
+package_manager = "conda"
 execution_model = "sealed_worker"
+conda_channels = ["conda-forge"]
+conda_python = "3.10.*"
 
 [tool.setuptools]
 py-modules = ["nodes"]
