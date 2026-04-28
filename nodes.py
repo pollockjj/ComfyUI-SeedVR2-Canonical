@@ -84,6 +84,11 @@ class SeedVR2Canonical:
             if not existing_pythonpath
             else f"{SEEDVR_ROOT}{os.pathsep}{existing_pythonpath}"
         )
+        env.setdefault("MASTER_ADDR", "127.0.0.1")
+        env.setdefault("MASTER_PORT", "29500")
+        env.setdefault("RANK", "0")
+        env.setdefault("WORLD_SIZE", "1")
+        env.setdefault("LOCAL_RANK", "0")
 
         subprocess.run(command, cwd=str(SEEDVR_ROOT), env=env, check=True)
         output_path = output_dir / input_path.name
