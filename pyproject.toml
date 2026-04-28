@@ -4,6 +4,7 @@ version = "0.1.0"
 dependencies = [
   "einops==0.7.0",
   "torch==2.4.0+cu121",
+  "antlr4-python3-runtime==4.9.3",
   "omegaconf==2.3.0",
   "opencv-python==4.9.0.80",
   "numpy==1.24.4",
@@ -11,6 +12,9 @@ dependencies = [
   "diffusers==0.29.1",
   "rotary-embedding-torch==0.5.3",
   "transformers==4.38.2",
+  "tokenizers==0.15.2",
+  "huggingface-hub==0.36.2",
+  "safetensors==0.7.0",
   "torchvision==0.19.0+cu121",
   "mediapy==1.2.0",
 ]
@@ -20,6 +24,21 @@ can_isolate = true
 share_torch = true
 package_manager = "uv"
 execution_model = "host-coupled"
+share_torch_no_deps = [
+  "einops",
+  "antlr4-python3-runtime",
+  "omegaconf",
+  "opencv-python",
+  "numpy",
+  "av",
+  "diffusers",
+  "rotary-embedding-torch",
+  "transformers",
+  "tokenizers",
+  "huggingface-hub",
+  "safetensors",
+  "mediapy",
+]
 
 [tool.setuptools]
 py-modules = ["nodes"]
