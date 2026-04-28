@@ -59,7 +59,7 @@ class SeedVR2Canonical:
             sys.executable,
             str(entrypoint),
             "--video_path",
-            str(input_path),
+            str(input_path.parent),
             "--output_dir",
             str(output_dir),
             "--seed",
