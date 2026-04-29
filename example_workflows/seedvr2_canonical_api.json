@@ -4,7 +4,9 @@
       "input_video": "/home/johnj/dev_cuda_0/ComfyUI/input/bedroom.mp4",
       "model_size": "3B",
       "seed": 666,
-      "resolution": 720
+      "resolution": 256,
+      "max_frames": 9,
+      "fused_norms": false
     },
     "class_type": "SeedVR2Canonical",
     "_meta": {

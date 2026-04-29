@@ -131,10 +131,16 @@ class NaMMRotaryEmbedding3d(MMRotaryEmbeddingBase):
         torch.Tensor,
         torch.Tensor,
     ]:
-        vid_freqs = self.get_axial_freqs(1024, 128, 128)
-        txt_freqs = self.get_axial_freqs(1024)
+        vid_shape_list = vid_shape.tolist()
+        txt_len_list = txt_shape[:, 0].tolist()
+        max_t = max(f + l for (f, _, _), l in zip(vid_shape_list, txt_len_list))
+        max_h = max(h for _, h, _ in vid_shape_list)
+        max_w = max(w for _, _, w in vid_shape_list)
+        max_txt = max(txt_len_list)
+        vid_freqs = self.get_axial_freqs(max_t, max_h, max_w)
+        txt_freqs = self.get_axial_freqs(max_txt)
         vid_freq_list, txt_freq_list = [], []
-        for (f, h, w), l in zip(vid_shape.tolist(), txt_shape[:, 0].tolist()):
+        for (f, h, w), l in zip(vid_shape_list, txt_len_list):
             vid_freq = vid_freqs[l : l + f, :h, :w].reshape(-1, vid_freqs.size(-1))
             txt_freq = txt_freqs[:l].repeat(1, 3).reshape(-1, vid_freqs.size(-1))
             vid_freq_list.append(vid_freq)

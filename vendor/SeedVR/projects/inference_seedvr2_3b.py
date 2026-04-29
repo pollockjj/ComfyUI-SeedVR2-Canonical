@@ -69,6 +69,11 @@ def is_image_file(filename):
 def configure_runner(sp_size):
     config_path = os.path.join('./configs_3b', 'main.yaml')
     config = load_config(config_path)
+    if os.environ.get("SEEDVR_DISABLE_FUSED_NORMS") == "1":
+        config.dit.model.vid_out_norm = "rms"
+        config.dit.model.txt_in_norm = "layer"
+        config.dit.model.norm = "rms"
+        config.dit.model.qk_norm = "rms"
     runner = VideoDiffusionInfer(config)
     OmegaConf.set_readonly(runner.config, False)
     
@@ -137,7 +142,7 @@ def generation_step(runner, text_embeds_dict, cond_latents):
 
     return samples
 
-def generation_loop(runner, video_path='./test_videos', output_dir='./results', batch_size=1, cfg_scale=1.0, cfg_rescale=0.0, sample_steps=1, seed=666, res_h=1280, res_w=720, sp_size=1, out_fps=None):
+def generation_loop(runner, video_path='./test_videos', output_dir='./results', batch_size=1, cfg_scale=1.0, cfg_rescale=0.0, sample_steps=1, seed=666, res_h=1280, res_w=720, sp_size=1, out_fps=None, max_frames=0):
 
     def _build_pos_and_neg_prompt():
         # read positive prompt
@@ -260,6 +265,8 @@ def generation_loop(runner, video_path='./test_videos', output_dir='./results', 
                 video, _, info = read_video(
                     os.path.join(video_path, video), output_format="TCHW"
                     )
+                if max_frames > 0:
+                    video = video[:max_frames]
                 video = video / 255.0
                 fps_lists.append(info["video_fps"] if out_fps is None else out_fps)
             print(f"Read video size: {video.size()}")
@@ -331,6 +338,7 @@ if __name__ == "__main__":
     parser.add_argument("--res_w", type=int, default=1280)
     parser.add_argument("--sp_size", type=int, default=1)
     parser.add_argument("--out_fps", type=float, default=None)
+    parser.add_argument("--max_frames", type=int, default=0)
     args = parser.parse_args()
 
     runner = configure_runner(args.sp_size)

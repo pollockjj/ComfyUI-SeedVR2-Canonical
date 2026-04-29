@@ -17,6 +17,9 @@ dependencies = [
   "safetensors==0.7.0",
   "torchvision==0.19.0+cu121",
   "mediapy==1.2.0",
+  "ipython==8.39.0",
+  "matplotlib==3.10.9",
+  "beartype==0.22.9",
 ]
 
 [tool.comfy.isolation]
@@ -38,6 +41,9 @@ share_torch_no_deps = [
   "huggingface-hub",
   "safetensors",
   "mediapy",
+  "ipython",
+  "matplotlib",
+  "beartype",
 ]
 
 [tool.setuptools]

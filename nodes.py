@@ -20,6 +20,8 @@ class SeedVR2Canonical:
                 "model_size": (["3B", "7B"], {"default": "3B"}),
                 "seed": ("INT", {"default": 666, "min": 0, "max": 2**32 - 1}),
                 "resolution": ("INT", {"default": 720, "min": 16, "max": 8192, "step": 16}),
+                "max_frames": ("INT", {"default": 0, "min": 0, "max": 100000, "step": 1}),
+                "fused_norms": ("BOOLEAN", {"default": False}),
             }
         }
 
@@ -46,7 +48,15 @@ class SeedVR2Canonical:
         except Exception:
             return REPO_ROOT / "outputs"
 
-    def run(self, input_video: str, model_size: str, seed: int, resolution: int):
+    def run(
+        self,
+        input_video: str,
+        model_size: str,
+        seed: int,
+        resolution: int,
+        max_frames: int,
+        fused_norms: bool,
+    ):
         input_path = Path(input_video).expanduser().resolve()
         if not input_path.is_file():
             raise FileNotFoundError(f"input_video does not exist: {input_path}")
@@ -76,6 +86,8 @@ class SeedVR2Canonical:
             "--res_w",
             str(resolution),
         ]
+        if max_frames > 0:
+            command.extend(["--max_frames", str(max_frames)])
 
         env = os.environ.copy()
         existing_pythonpath = env.get("PYTHONPATH")
@@ -89,6 +101,8 @@ class SeedVR2Canonical:
         env.setdefault("RANK", "0")
         env.setdefault("WORLD_SIZE", "1")
         env.setdefault("LOCAL_RANK", "0")
+        if not fused_norms:
+            env["SEEDVR_DISABLE_FUSED_NORMS"] = "1"
 
         subprocess.run(command, cwd=str(SEEDVR_ROOT), env=env, check=True)
         output_path = output_dir / input_path.name
