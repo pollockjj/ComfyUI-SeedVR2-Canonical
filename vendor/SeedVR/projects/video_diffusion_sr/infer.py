@@ -13,7 +13,9 @@
 # // limitations under the License.
 
 from typing import List, Optional, Tuple, Union
+import gc
 import torch
+from safetensors.torch import load_file as load_safetensors_file
 from einops import rearrange
 from omegaconf import DictConfig, ListConfig
 from torch import Tensor
@@ -86,7 +88,10 @@ class VideoDiffusionInfer():
         self.dit.set_gradient_checkpointing(self.config.dit.gradient_checkpoint)
 
         if checkpoint:
-            state = torch.load(checkpoint, map_location="cpu", mmap=True)
+            if str(checkpoint).endswith(".safetensors"):
+                state = load_safetensors_file(checkpoint, device="cpu")
+            else:
+                state = torch.load(checkpoint, map_location="cpu", mmap=True)
             loading_info = self.dit.load_state_dict(state, strict=True, assign=True)
             print(f"Loading pretrained ckpt from {checkpoint}")
             print(f"Loading info: {loading_info}")
@@ -254,7 +259,7 @@ class VideoDiffusionInfer():
         return timesteps
 
     @torch.no_grad()
-    def inference(
+    def inference_latents(
         self,
         noises: List[Tensor],
         conditions: List[Tensor],
@@ -338,6 +343,31 @@ class VideoDiffusionInfer():
 
         if dit_offload:
             self.dit.to("cpu")
+            del latents_cond, conditions
+            del text_pos_embeds, text_neg_embeds, text_pos_shapes, text_neg_shapes
+            gc.collect()
+            torch.cuda.empty_cache()
+
+        return latents
+
+    @torch.no_grad()
+    def inference(
+        self,
+        noises: List[Tensor],
+        conditions: List[Tensor],
+        texts_pos: Union[List[str], List[Tensor], List[Tuple[Tensor]]],
+        texts_neg: Union[List[str], List[Tensor], List[Tuple[Tensor]]],
+        cfg_scale: Optional[float] = None,
+        dit_offload: bool = False,
+    ) -> List[Tensor]:
+        latents = self.inference_latents(
+            noises=noises,
+            conditions=conditions,
+            texts_pos=texts_pos,
+            texts_neg=texts_neg,
+            cfg_scale=cfg_scale,
+            dit_offload=dit_offload,
+        )
 
         # Vae decode.
         self.vae.to(get_device())

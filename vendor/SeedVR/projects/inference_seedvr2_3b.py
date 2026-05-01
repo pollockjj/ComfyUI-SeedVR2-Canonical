@@ -83,6 +83,26 @@ from common.seed import set_seed
 from common.partition import partition_by_groups, partition_by_size
 
 
+def _log_cuda(label):
+    if not torch.cuda.is_available():
+        print(f"[CANONICAL_PHASE] {label}: cuda_unavailable", flush=True)
+        return
+    torch.cuda.synchronize()
+    free_bytes, total_bytes = torch.cuda.mem_get_info()
+    allocated = torch.cuda.memory_allocated()
+    reserved = torch.cuda.memory_reserved()
+    peak_allocated = torch.cuda.max_memory_allocated()
+    print(
+        "[CANONICAL_PHASE] "
+        f"{label}: allocated={allocated / 1024 ** 3:.2f}GiB "
+        f"reserved={reserved / 1024 ** 3:.2f}GiB "
+        f"peak_allocated={peak_allocated / 1024 ** 3:.2f}GiB "
+        f"free={free_bytes / 1024 ** 3:.2f}GiB "
+        f"total={total_bytes / 1024 ** 3:.2f}GiB",
+        flush=True,
+    )
+
+
 def configure_sequence_parallel(sp_size):
     if sp_size > 1:
         init_sequence_parallel(sp_size)
@@ -104,7 +124,8 @@ def configure_runner(sp_size):
     
     init_torch(cudnn_benchmark=False, timeout=datetime.timedelta(seconds=3600))
     configure_sequence_parallel(sp_size)
-    runner.configure_dit_model(device="cuda", checkpoint='./ckpts/seedvr2_ema_3b.pth')
+    dit_checkpoint = os.environ.get("SEEDVR_DIT_CHECKPOINT", "./ckpts/seedvr2_ema_3b.pth")
+    runner.configure_dit_model(device="cuda", checkpoint=dit_checkpoint)
     runner.configure_vae_model()
     # Set memory limit.
     if hasattr(runner.vae, "set_memory_limit"):
@@ -115,6 +136,7 @@ def generation_step(runner, text_embeds_dict, cond_latents):
     def _move_to_cuda(x):
         return [i.to(get_device()) for i in x]
 
+    _log_cuda("PROCESSING_BEFORE_NOISE")
     noises = [torch.randn_like(latent) for latent in cond_latents]
     aug_noises = [torch.randn_like(latent) for latent in cond_latents]
     print(f"Generating with noise shape: {noises[0].size()}.")
@@ -148,12 +170,14 @@ def generation_step(runner, text_embeds_dict, cond_latents):
     ]
 
     with torch.no_grad(), torch.autocast("cuda", torch.bfloat16, enabled=True):
+        _log_cuda("PROCESSING_BEFORE_DIT_INFERENCE")
         video_tensors = runner.inference(
             noises=noises,
             conditions=conditions,
             dit_offload=True,
             **text_embeds_dict,
         )
+        _log_cuda("PROCESSING_AFTER_DIT_INFERENCE")
 
     samples = [
         (
@@ -304,16 +328,21 @@ def generation_loop(runner, video_path='./test_videos', output_dir='./results', 
         runner.dit.to("cpu")
         print(f"Encoding videos: {list(map(lambda x: x.size(), cond_latents))}")
         runner.vae.to(get_device())
+        _log_cuda("VAE_ENCODE_BEFORE")
         cond_latents = runner.vae_encode(cond_latents)
+        _log_cuda("VAE_ENCODE_AFTER")
         runner.vae.to("cpu")
         runner.dit.to(get_device())
+        _log_cuda("PROCESSING_AFTER_DIT_TO_CUDA")
 
         for i, emb in enumerate(text_embeds["texts_pos"]):
             text_embeds["texts_pos"][i] = emb.to(get_device())
         for i, emb in enumerate(text_embeds["texts_neg"]):
             text_embeds["texts_neg"][i] = emb.to(get_device())
 
+        _log_cuda("PROCESSING_BEFORE_GENERATION_STEP")
         samples = generation_step(runner, text_embeds, cond_latents=cond_latents)
+        _log_cuda("PROCESSING_AFTER_GENERATION_STEP_BEFORE_DECODE_OUTPUT")
         runner.dit.to("cpu")
         del cond_latents
 
@@ -336,7 +365,9 @@ def generation_loop(runner, video_path='./test_videos', output_dir='./results', 
                         sample.to("cpu"), input[: sample.size(0)].to("cpu")
                     )
                 else:
+                    _log_cuda("OUTPUT_DECODE_BEFORE_CPU_MOVE")
                     sample = sample.to("cpu")
+                    _log_cuda("OUTPUT_DECODE_AFTER_CPU_MOVE")
                 sample = (
                     rearrange(sample[:, None], "t c h w -> t h w c")
                     if sample.ndim == 3
