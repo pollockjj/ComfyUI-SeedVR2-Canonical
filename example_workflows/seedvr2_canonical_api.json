@@ -1,16 +1,35 @@
 {
   "1": {
     "inputs": {
-      "input_video": "/home/johnj/dev_cuda_0/ComfyUI/input/bedroom.mp4",
+      "input_video": "/home/johnj/dev_cuda_0/ComfyUI/input/bedroom_first9frames.mp4",
       "model_size": "3B",
+      "output_dir": "./results",
       "seed": 666,
-      "resolution": 256,
-      "max_frames": 9,
+      "res_h": 720,
+      "res_w": 1280,
+      "sp_size": 1,
+      "out_fps": 0.0,
+      "max_frames": 0,
       "fused_norms": false
     },
     "class_type": "SeedVR2Canonical",
     "_meta": {
       "title": "SeedVR2 Canonical"
+    }
+  },
+  "2": {
+    "inputs": {
+      "video": [
+        "1",
+        0
+      ],
+      "filename_prefix": "issue175/pollockjj_seedvr2_canonical",
+      "format": "auto",
+      "codec": "auto"
+    },
+    "class_type": "SaveVideo",
+    "_meta": {
+      "title": "Save pollockjj canonical output"
     }
   }
 }

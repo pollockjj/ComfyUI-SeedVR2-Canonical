@@ -33,7 +33,32 @@ else:
     use_colorfix = False
     print('Note!!!!!! Color fix is not avaliable!')
 from torchvision.transforms import Compose, Lambda, Normalize
-from torchvision.io.video import read_video
+try:
+    from torchvision.io.video import read_video
+except ModuleNotFoundError:
+    import cv2
+    import numpy as np
+
+    def read_video(filename, output_format="TCHW"):
+        if output_format != "TCHW":
+            raise ValueError(f"unsupported output_format: {output_format}")
+        cap = cv2.VideoCapture(filename)
+        if not cap.isOpened():
+            raise FileNotFoundError(f"unable to open video: {filename}")
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        frames = []
+        try:
+            while True:
+                ok, frame = cap.read()
+                if not ok:
+                    break
+                frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        finally:
+            cap.release()
+        if not frames:
+            raise ValueError(f"video contains no readable frames: {filename}")
+        video = torch.from_numpy(np.stack(frames)).permute(0, 3, 1, 2)
+        return video, None, {"video_fps": fps}
 from torchvision.io import read_image
 
 

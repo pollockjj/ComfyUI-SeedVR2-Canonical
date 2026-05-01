@@ -4,7 +4,10 @@ import os
 import subprocess
 import sys
 import shutil
+import uuid
 from pathlib import Path
+
+from comfy_api.latest import InputImpl
 
 
 REPO_ROOT = Path(__file__).resolve().parent
@@ -18,8 +21,12 @@ class SeedVR2Canonical:
             "required": {
                 "input_video": ("STRING", {"default": ""}),
                 "model_size": (["3B", "7B"], {"default": "3B"}),
+                "output_dir": ("STRING", {"default": "./results"}),
                 "seed": ("INT", {"default": 666, "min": 0, "max": 2**32 - 1}),
-                "resolution": ("INT", {"default": 720, "min": 16, "max": 8192, "step": 16}),
+                "res_h": ("INT", {"default": 720, "min": 16, "max": 8192, "step": 16}),
+                "res_w": ("INT", {"default": 1280, "min": 16, "max": 8192, "step": 16}),
+                "sp_size": ("INT", {"default": 1, "min": 1, "max": 1024, "step": 1}),
+                "out_fps": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1000.0, "step": 0.001}),
                 "max_frames": ("INT", {"default": 0, "min": 0, "max": 100000, "step": 1}),
                 "fused_norms": ("BOOLEAN", {"default": False}),
             }
@@ -29,7 +36,6 @@ class SeedVR2Canonical:
     RETURN_NAMES = ("output_video",)
     FUNCTION = "run"
     CATEGORY = "video/upscale"
-    OUTPUT_NODE = True
 
     @staticmethod
     def _entrypoint(model_size: str) -> Path:
@@ -44,7 +50,7 @@ class SeedVR2Canonical:
         try:
             import folder_paths
 
-            return Path(folder_paths.get_output_directory()) / "seedvr2_canonical"
+            return Path(folder_paths.get_temp_directory()) / "seedvr2_canonical"
         except Exception:
             return REPO_ROOT / "outputs"
 
@@ -52,8 +58,12 @@ class SeedVR2Canonical:
         self,
         input_video: str,
         model_size: str,
+        output_dir: str,
         seed: int,
-        resolution: int,
+        res_h: int,
+        res_w: int,
+        sp_size: int,
+        out_fps: float,
         max_frames: int,
         fused_norms: bool,
     ):
@@ -65,12 +75,21 @@ class SeedVR2Canonical:
         if not entrypoint.is_file():
             raise FileNotFoundError(f"SeedVR2 entrypoint does not exist: {entrypoint}")
 
-        output_dir = self._output_dir()
-        output_dir.mkdir(parents=True, exist_ok=True)
-        staged_input_dir = output_dir / "inputs"
+        if output_dir:
+            output_path_dir = Path(output_dir).expanduser()
+            if not output_path_dir.is_absolute():
+                output_path_dir = SEEDVR_ROOT / output_path_dir
+        else:
+            output_path_dir = self._output_dir()
+
+        output_path_dir.mkdir(parents=True, exist_ok=True)
+        staged_input_dir = output_path_dir / "inputs" / f"{input_path.stem}_{uuid.uuid4().hex}"
         staged_input_dir.mkdir(parents=True, exist_ok=True)
         staged_input = staged_input_dir / input_path.name
         shutil.copy2(input_path, staged_input)
+        output_path = output_path_dir / input_path.name
+        if output_path.exists():
+            output_path.unlink()
 
         command = [
             sys.executable,
@@ -78,14 +97,18 @@ class SeedVR2Canonical:
             "--video_path",
             str(staged_input_dir),
             "--output_dir",
-            str(output_dir),
+            str(output_path_dir),
             "--seed",
             str(seed),
             "--res_h",
-            str(resolution),
+            str(res_h),
             "--res_w",
-            str(resolution),
+            str(res_w),
+            "--sp_size",
+            str(sp_size),
         ]
+        if out_fps > 0:
+            command.extend(["--out_fps", str(out_fps)])
         if max_frames > 0:
             command.extend(["--max_frames", str(max_frames)])
 
@@ -105,10 +128,9 @@ class SeedVR2Canonical:
             env["SEEDVR_DISABLE_FUSED_NORMS"] = "1"
 
         subprocess.run(command, cwd=str(SEEDVR_ROOT), env=env, check=True)
-        output_path = output_dir / input_path.name
         if not output_path.exists():
             raise FileNotFoundError(f"SeedVR2 did not produce expected output: {output_path}")
-        return (str(output_path),)
+        return (InputImpl.VideoFromFile(str(output_path)),)
 
 
 NODE_CLASS_MAPPINGS = {
