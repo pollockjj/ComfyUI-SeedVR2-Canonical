@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import uuid
+from fractions import Fraction
 from pathlib import Path
 
 
@@ -16,6 +17,7 @@ DOVER_ROOT = REPO_ROOT / "vendor" / "DOVER"
 
 NR_METRIC_NAMES = ("niqe", "musiq", "clip_iqa", "dover_fused")
 FR_METRIC_NAMES = ("psnr", "ssim", "lpips", "dists")
+VIDEO_ALIGNMENT_KEYS = ("frame_count", "frame_rate", "width", "height")
 
 
 class SeedVR2Canonical:
@@ -214,12 +216,161 @@ class SeedVR2Analysis:
                 return str(candidate)
         return str(video)
 
+    @staticmethod
+    def _mapping_value(mapping, key):
+        if key in mapping:
+            return mapping[key]
+        for nested_key in ("metadata", "video_metadata", "info"):
+            nested = mapping.get(nested_key)
+            if hasattr(nested, "get") and key in nested:
+                return nested[key]
+        if key == "frame_rate":
+            if "fps" in mapping:
+                return mapping["fps"]
+            for nested_key in ("metadata", "video_metadata", "info"):
+                nested = mapping.get(nested_key)
+                if hasattr(nested, "get") and "fps" in nested:
+                    return nested["fps"]
+        return None
+
+    @classmethod
+    def _object_value(cls, video, key):
+        if hasattr(video, "get"):
+            return cls._mapping_value(video, key)
+        candidate = getattr(video, key, None)
+        if candidate is not None:
+            return candidate
+        if key == "frame_rate":
+            candidate = getattr(video, "fps", None)
+            if candidate is not None:
+                return candidate
+        for nested_key in ("metadata", "video_metadata", "info"):
+            nested = getattr(video, nested_key, None)
+            if hasattr(nested, "get"):
+                candidate = cls._mapping_value(nested, key)
+            else:
+                candidate = getattr(nested, key, None)
+            if candidate is not None:
+                return candidate
+        return None
+
+    @staticmethod
+    def _normalize_metadata_value(key: str, value):
+        if key in {"frame_count", "width", "height"}:
+            return int(value)
+        if key == "frame_rate":
+            if isinstance(value, Fraction):
+                return value
+            if isinstance(value, int):
+                return Fraction(value, 1)
+            if isinstance(value, float):
+                return Fraction(str(value))
+            return Fraction(str(value))
+        raise KeyError(key)
+
+    @staticmethod
+    def _json_metadata_value(key: str, value):
+        normalized = SeedVR2Analysis._normalize_metadata_value(key, value)
+        if isinstance(normalized, Fraction):
+            return float(normalized)
+        return normalized
+
+    @classmethod
+    def _metadata_from_object(cls, video):
+        values = {}
+        for key in VIDEO_ALIGNMENT_KEYS:
+            value = cls._object_value(video, key)
+            if value is None:
+                return None
+            values[key] = value
+        return values
+
+    @classmethod
+    def _probe_video_metadata(cls, video_path: str) -> dict[str, object]:
+        ffprobe = shutil.which("ffprobe")
+        if ffprobe is None:
+            raise FileNotFoundError("ffprobe executable not found for video metadata alignment")
+        if not Path(video_path).is_file():
+            raise FileNotFoundError(f"video file does not exist for metadata alignment: {video_path}")
+
+        command = [
+            ffprobe,
+            "-v",
+            "error",
+            "-count_frames",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height,nb_frames,nb_read_frames,r_frame_rate",
+            "-of",
+            "json",
+            video_path,
+        ]
+        completed = subprocess.run(command, check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        payload = json.loads(completed.stdout)
+        streams = payload.get("streams") or []
+        if not streams:
+            raise ValueError(f"ffprobe found no video stream: {video_path}")
+        stream = streams[0]
+        frame_count = stream.get("nb_frames")
+        if frame_count in (None, "N/A"):
+            frame_count = stream.get("nb_read_frames")
+        if frame_count in (None, "N/A"):
+            raise ValueError(f"ffprobe did not report frame count: {video_path}")
+        return {
+            "frame_count": frame_count,
+            "frame_rate": stream["r_frame_rate"],
+            "width": stream["width"],
+            "height": stream["height"],
+        }
+
+    @classmethod
+    def _video_metadata(cls, video, video_path: str) -> dict[str, object]:
+        metadata = cls._metadata_from_object(video)
+        if metadata is None:
+            metadata = cls._probe_video_metadata(video_path)
+        return {
+            key: cls._json_metadata_value(key, metadata[key])
+            for key in VIDEO_ALIGNMENT_KEYS
+        }
+
+    @classmethod
+    def _assert_reference_alignment(cls, output_metadata, reference_metadata):
+        mismatches = []
+        for key in VIDEO_ALIGNMENT_KEYS:
+            output_value = cls._normalize_metadata_value(key, output_metadata[key])
+            reference_value = cls._normalize_metadata_value(key, reference_metadata[key])
+            if output_value != reference_value:
+                mismatches.append(key)
+        if mismatches:
+            joined = ", ".join(mismatches)
+            raise ValueError(f"reference_video metadata mismatch: {joined}")
+        return {
+            "matched": True,
+            "checked": list(VIDEO_ALIGNMENT_KEYS),
+            "output": output_metadata,
+            "reference": reference_metadata,
+            "mismatches": [],
+        }
+
     def analyze(self, output_video, reference_video=None):
         artifact_dir = self._artifact_dir()
         artifact_dir.mkdir(parents=True, exist_ok=True)
         artifact_path = artifact_dir / f"seedvr2_analysis_{uuid.uuid4().hex}.json"
         output_video_path = self._video_path(output_video)
         reference_video_path = None if reference_video is None else self._video_path(reference_video)
+        alignment = {
+            "matched": False,
+            "checked": [],
+            "output": None,
+            "reference": None,
+            "mismatches": [],
+        }
+
+        if reference_video_path is not None:
+            output_metadata = self._video_metadata(output_video, output_video_path)
+            reference_metadata = self._video_metadata(reference_video, reference_video_path)
+            alignment = self._assert_reference_alignment(output_metadata, reference_metadata)
 
         nr_metrics = self._metric_backend.compute_nr_metrics(output_video_path)
         fr_metrics = None
@@ -236,6 +387,7 @@ class SeedVR2Analysis:
                 "fr": fr_metrics,
                 "nr": nr_metrics,
             },
+            "alignment": alignment,
             "tool_provenance": [],
         }
         artifact_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
