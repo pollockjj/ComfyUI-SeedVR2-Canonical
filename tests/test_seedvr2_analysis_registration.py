@@ -16,6 +16,19 @@ NODE_CLASS_MAPPINGS = NODES.NODE_CLASS_MAPPINGS
 NODE_DISPLAY_NAME_MAPPINGS = NODES.NODE_DISPLAY_NAME_MAPPINGS
 
 
+class StaticMetricBackend:
+    def compute_nr_metrics(self, output_video_path):
+        return {
+            "niqe": 1.0,
+            "musiq": 2.0,
+            "clip_iqa": 3.0,
+            "dover_fused": 4.0,
+        }
+
+    def compute_fr_metrics(self, output_video_path, reference_video_path):
+        raise AssertionError("registration smoke does not pass a reference video")
+
+
 def test_seedvr2_analysis_registration_and_contract():
     assert "SeedVR2Canonical" in NODE_CLASS_MAPPINGS
     assert "SeedVR2Analysis" in NODE_CLASS_MAPPINGS
@@ -28,7 +41,7 @@ def test_seedvr2_analysis_registration_and_contract():
     assert input_types["required"]["output_video"][0] == "VIDEO"
     assert input_types["optional"]["reference_video"][0] == "VIDEO"
 
-    artifact_path = Path(analysis_cls().analyze("output.mp4")[0])
+    artifact_path = Path(analysis_cls(metric_backend=StaticMetricBackend()).analyze("output.mp4")[0])
     assert artifact_path.is_file()
 
     payload = json.loads(artifact_path.read_text(encoding="utf-8"))

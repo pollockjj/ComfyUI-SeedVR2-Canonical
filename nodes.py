@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -11,6 +12,10 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent
 SEEDVR_ROOT = REPO_ROOT / "vendor" / "SeedVR"
+DOVER_ROOT = REPO_ROOT / "vendor" / "DOVER"
+
+NR_METRIC_NAMES = ("niqe", "musiq", "clip_iqa", "dover_fused")
+FR_METRIC_NAMES = ("psnr", "ssim", "lpips", "dists")
 
 
 class SeedVR2Canonical:
@@ -99,7 +104,76 @@ class SeedVR2Canonical:
         return (str(output_path),)
 
 
+class SeedVR2MetricBackend:
+    @staticmethod
+    def _to_float(value) -> float:
+        if hasattr(value, "detach"):
+            value = value.detach()
+        if hasattr(value, "cpu"):
+            value = value.cpu()
+        if hasattr(value, "item"):
+            return float(value.item())
+        if isinstance(value, (list, tuple)):
+            if len(value) != 1:
+                raise ValueError(f"metric backend returned non-scalar sequence: {value!r}")
+            return SeedVR2MetricBackend._to_float(value[0])
+        return float(value)
+
+    @staticmethod
+    def _pyiqa_metric_name(metric_name: str) -> str:
+        return "clipiqa" if metric_name == "clip_iqa" else metric_name
+
+    def _run_pyiqa_metric(self, metric_name: str, output_video_path: str, reference_video_path: str | None = None) -> float:
+        try:
+            import pyiqa
+        except Exception as exc:
+            raise RuntimeError(f"pyiqa metric backend unavailable for {metric_name}") from exc
+
+        metric = pyiqa.create_metric(self._pyiqa_metric_name(metric_name))
+        if reference_video_path is None:
+            return self._to_float(metric(output_video_path))
+        return self._to_float(metric(output_video_path, reference_video_path))
+
+    def _run_dover_fused(self, output_video_path: str) -> float:
+        evaluate_script = DOVER_ROOT / "evaluate_one_video.py"
+        if not evaluate_script.is_file():
+            raise FileNotFoundError(f"DOVER evaluation script does not exist: {evaluate_script}")
+
+        command = [sys.executable, str(evaluate_script), "-v", output_video_path, "-f"]
+        completed = subprocess.run(
+            command,
+            cwd=str(DOVER_ROOT),
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        matches = re.findall(r"[-+]?(?:\d*\.\d+|\d+)", completed.stdout)
+        if not matches:
+            raise RuntimeError(f"DOVER did not emit a numeric fused score: {completed.stdout!r}")
+        return float(matches[-1])
+
+    def compute_nr_metrics(self, output_video_path: str) -> dict[str, float]:
+        return {
+            "niqe": self._run_pyiqa_metric("niqe", output_video_path),
+            "musiq": self._run_pyiqa_metric("musiq", output_video_path),
+            "clip_iqa": self._run_pyiqa_metric("clip_iqa", output_video_path),
+            "dover_fused": self._run_dover_fused(output_video_path),
+        }
+
+    def compute_fr_metrics(self, output_video_path: str, reference_video_path: str) -> dict[str, float]:
+        return {
+            "psnr": self._run_pyiqa_metric("psnr", output_video_path, reference_video_path),
+            "ssim": self._run_pyiqa_metric("ssim", output_video_path, reference_video_path),
+            "lpips": self._run_pyiqa_metric("lpips", output_video_path, reference_video_path),
+            "dists": self._run_pyiqa_metric("dists", output_video_path, reference_video_path),
+        }
+
+
 class SeedVR2Analysis:
+    def __init__(self, metric_backend=None):
+        self._metric_backend = metric_backend or SeedVR2MetricBackend()
+
     @classmethod
     def INPUT_TYPES(cls):
         return {
@@ -144,16 +218,23 @@ class SeedVR2Analysis:
         artifact_dir = self._artifact_dir()
         artifact_dir.mkdir(parents=True, exist_ok=True)
         artifact_path = artifact_dir / f"seedvr2_analysis_{uuid.uuid4().hex}.json"
+        output_video_path = self._video_path(output_video)
+        reference_video_path = None if reference_video is None else self._video_path(reference_video)
+
+        nr_metrics = self._metric_backend.compute_nr_metrics(output_video_path)
+        fr_metrics = None
+        if reference_video_path is not None:
+            fr_metrics = self._metric_backend.compute_fr_metrics(output_video_path, reference_video_path)
 
         payload = {
             "schema_version": "1.0",
             "inputs": {
-                "output_video": self._video_path(output_video),
-                "reference_video": None if reference_video is None else self._video_path(reference_video),
+                "output_video": output_video_path,
+                "reference_video": reference_video_path,
             },
             "metrics": {
-                "fr": None,
-                "nr": {},
+                "fr": fr_metrics,
+                "nr": nr_metrics,
             },
             "tool_provenance": [],
         }
