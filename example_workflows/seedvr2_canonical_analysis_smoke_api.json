@@ -1,0 +1,21 @@
+{
+  "1": {
+    "class_type": "SeedVR2AnalysisSmokeVideo",
+    "inputs": {
+      "frame_count": 1,
+      "frame_rate": "24/1",
+      "height": 64,
+      "path": "seedvr2_analysis_smoke.mp4",
+      "width": 64
+    }
+  },
+  "2": {
+    "class_type": "SeedVR2Analysis",
+    "inputs": {
+      "output_video": [
+        "1",
+        0
+      ]
+    }
+  }
+}

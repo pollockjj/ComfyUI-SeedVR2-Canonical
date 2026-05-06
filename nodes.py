@@ -7,6 +7,8 @@ import shutil
 import subprocess
 import sys
 import uuid
+from hashlib import sha256
+from importlib import metadata
 from fractions import Fraction
 from pathlib import Path
 
@@ -107,6 +109,8 @@ class SeedVR2Canonical:
 
 
 class SeedVR2MetricBackend:
+    DOVER_WEIGHTS_PATH = DOVER_ROOT / "pretrained_weights" / "DOVER.pth"
+
     @staticmethod
     def _to_float(value) -> float:
         if hasattr(value, "detach"):
@@ -125,6 +129,89 @@ class SeedVR2MetricBackend:
     def _pyiqa_metric_name(metric_name: str) -> str:
         return "clipiqa" if metric_name == "clip_iqa" else metric_name
 
+    @staticmethod
+    def _file_sha256(path: Path) -> str:
+        digest = sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    @staticmethod
+    def _distribution_version(name: str) -> str:
+        try:
+            return metadata.version(name)
+        except metadata.PackageNotFoundError as exc:
+            raise RuntimeError(f"required Python distribution is unavailable: {name}") from exc
+
+    @staticmethod
+    def _module_version(module_name: str, distribution_name: str | None = None) -> str:
+        distribution = distribution_name or module_name
+        return SeedVR2MetricBackend._distribution_version(distribution)
+
+    @staticmethod
+    def _command_stdout(command: list[str], cwd: Path | None = None) -> str:
+        completed = subprocess.run(
+            command,
+            cwd=None if cwd is None else str(cwd),
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        return completed.stdout.strip()
+
+    @classmethod
+    def _dover_commit(cls) -> str:
+        if not DOVER_ROOT.is_dir():
+            raise FileNotFoundError(f"DOVER repository does not exist: {DOVER_ROOT}")
+        return cls._command_stdout(["git", "rev-parse", "HEAD"], DOVER_ROOT)
+
+    @classmethod
+    def _ffmpeg_version(cls) -> str:
+        ffmpeg = shutil.which("ffmpeg")
+        if ffmpeg is None:
+            raise FileNotFoundError("ffmpeg executable not found")
+        output = cls._command_stdout([ffmpeg, "-version"])
+        return output.splitlines()[0]
+
+    @classmethod
+    def _require_dover_weights(cls) -> Path:
+        if not cls.DOVER_WEIGHTS_PATH.is_file():
+            raise FileNotFoundError(f"DOVER weights do not exist: {cls.DOVER_WEIGHTS_PATH}")
+        return cls.DOVER_WEIGHTS_PATH
+
+    def tool_provenance(self) -> dict[str, dict[str, str]]:
+        import torch
+
+        dover_weights = self._require_dover_weights()
+        return {
+            "pyiqa": {
+                "name": "pyiqa",
+                "version": self._module_version("pyiqa"),
+            },
+            "dover": {
+                "name": "VQAssessment/DOVER",
+                "commit": self._dover_commit(),
+            },
+            "dover_weights": {
+                "name": dover_weights.name,
+                "sha256": self._file_sha256(dover_weights),
+            },
+            "ffmpeg": {
+                "name": "ffmpeg",
+                "version": self._ffmpeg_version(),
+            },
+            "torch": {
+                "name": "torch",
+                "version": torch.__version__,
+            },
+            "decord": {
+                "name": "decord",
+                "version": self._module_version("decord"),
+            },
+        }
+
     def _run_pyiqa_metric(self, metric_name: str, output_video_path: str, reference_video_path: str | None = None) -> float:
         try:
             import pyiqa
@@ -137,6 +224,7 @@ class SeedVR2MetricBackend:
         return self._to_float(metric(output_video_path, reference_video_path))
 
     def _run_dover_fused(self, output_video_path: str) -> float:
+        self._require_dover_weights()
         evaluate_script = DOVER_ROOT / "evaluate_one_video.py"
         if not evaluate_script.is_file():
             raise FileNotFoundError(f"DOVER evaluation script does not exist: {evaluate_script}")
@@ -170,6 +258,65 @@ class SeedVR2MetricBackend:
             "lpips": self._run_pyiqa_metric("lpips", output_video_path, reference_video_path),
             "dists": self._run_pyiqa_metric("dists", output_video_path, reference_video_path),
         }
+
+
+class SeedVR2StaticMetricBackend:
+    def compute_nr_metrics(self, output_video_path: str) -> dict[str, float]:
+        return {
+            "niqe": 1.0,
+            "musiq": 2.0,
+            "clip_iqa": 3.0,
+            "dover_fused": 4.0,
+        }
+
+    def compute_fr_metrics(self, output_video_path: str, reference_video_path: str) -> dict[str, float]:
+        return {
+            "psnr": 10.0,
+            "ssim": 0.9,
+            "lpips": 0.1,
+            "dists": 0.2,
+        }
+
+    def tool_provenance(self) -> dict[str, dict[str, str]]:
+        return {
+            "pyiqa": {"name": "pyiqa", "version": "static-smoke"},
+            "dover": {"name": "VQAssessment/DOVER", "commit": "0" * 40},
+            "dover_weights": {"name": "DOVER.pth", "sha256": "0" * 64},
+            "ffmpeg": {"name": "ffmpeg", "version": "static-smoke"},
+            "torch": {"name": "torch", "version": "static-smoke"},
+            "decord": {"name": "decord", "version": "static-smoke"},
+        }
+
+
+class SeedVR2AnalysisSmokeVideo:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "path": ("STRING", {"default": "seedvr2_analysis_smoke.mp4"}),
+                "frame_count": ("INT", {"default": 1, "min": 1, "max": 100000}),
+                "frame_rate": ("STRING", {"default": "24/1"}),
+                "width": ("INT", {"default": 64, "min": 1, "max": 8192}),
+                "height": ("INT", {"default": 64, "min": 1, "max": 8192}),
+            }
+        }
+
+    RETURN_TYPES = ("VIDEO",)
+    RETURN_NAMES = ("video",)
+    FUNCTION = "make_video"
+    CATEGORY = "video/analysis"
+
+    def make_video(self, path: str, frame_count: int, frame_rate: str, width: int, height: int):
+        return ({
+            "path": path,
+            "metadata": {
+                "frame_count": frame_count,
+                "frame_rate": frame_rate,
+                "width": width,
+                "height": height,
+            },
+            "seedvr2_analysis_smoke_backend": True,
+        },)
 
 
 class SeedVR2Analysis:
@@ -215,6 +362,15 @@ class SeedVR2Analysis:
             if candidate is not None:
                 return str(candidate)
         return str(video)
+
+    @staticmethod
+    def _uses_smoke_backend(*videos) -> bool:
+        for video in videos:
+            if hasattr(video, "get") and video.get("seedvr2_analysis_smoke_backend") is True:
+                return True
+            if getattr(video, "seedvr2_analysis_smoke_backend", False) is True:
+                return True
+        return False
 
     @staticmethod
     def _mapping_value(mapping, key):
@@ -359,6 +515,11 @@ class SeedVR2Analysis:
         artifact_path = artifact_dir / f"seedvr2_analysis_{uuid.uuid4().hex}.json"
         output_video_path = self._video_path(output_video)
         reference_video_path = None if reference_video is None else self._video_path(reference_video)
+        metric_backend = (
+            SeedVR2StaticMetricBackend()
+            if self._uses_smoke_backend(output_video, reference_video)
+            else self._metric_backend
+        )
         alignment = {
             "matched": False,
             "checked": [],
@@ -372,10 +533,13 @@ class SeedVR2Analysis:
             reference_metadata = self._video_metadata(reference_video, reference_video_path)
             alignment = self._assert_reference_alignment(output_metadata, reference_metadata)
 
-        nr_metrics = self._metric_backend.compute_nr_metrics(output_video_path)
+        nr_metrics = metric_backend.compute_nr_metrics(output_video_path)
         fr_metrics = None
         if reference_video_path is not None:
-            fr_metrics = self._metric_backend.compute_fr_metrics(output_video_path, reference_video_path)
+            fr_metrics = metric_backend.compute_fr_metrics(output_video_path, reference_video_path)
+        if not hasattr(metric_backend, "tool_provenance"):
+            raise RuntimeError("metric backend does not provide tool provenance")
+        tool_provenance = metric_backend.tool_provenance()
 
         payload = {
             "schema_version": "1.0",
@@ -388,18 +552,21 @@ class SeedVR2Analysis:
                 "nr": nr_metrics,
             },
             "alignment": alignment,
-            "tool_provenance": [],
+            "tool_provenance": tool_provenance,
         }
         artifact_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        print(f"SeedVR2Analysis metrics_artifact: {artifact_path}", flush=True)
         return (str(artifact_path),)
 
 
 NODE_CLASS_MAPPINGS = {
     "SeedVR2Canonical": SeedVR2Canonical,
+    "SeedVR2AnalysisSmokeVideo": SeedVR2AnalysisSmokeVideo,
     "SeedVR2Analysis": SeedVR2Analysis,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "SeedVR2Canonical": "SeedVR2 Canonical",
+    "SeedVR2AnalysisSmokeVideo": "SeedVR2 Analysis Smoke Video",
     "SeedVR2Analysis": "SeedVR2 Analysis",
 }

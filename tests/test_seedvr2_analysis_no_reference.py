@@ -46,6 +46,16 @@ class RecordingMetricBackend:
             "dists": 0.2,
         }
 
+    def tool_provenance(self):
+        return {
+            "pyiqa": {"name": "pyiqa", "version": "test"},
+            "dover": {"name": "VQAssessment/DOVER", "commit": "test"},
+            "dover_weights": {"name": "DOVER.pth", "sha256": "test"},
+            "ffmpeg": {"name": "ffmpeg", "version": "test"},
+            "torch": {"name": "torch", "version": "test"},
+            "decord": {"name": "decord", "version": "test"},
+        }
+
 
 def _write_evidence(name: str, payload) -> Path:
     EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)

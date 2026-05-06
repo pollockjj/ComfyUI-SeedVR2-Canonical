@@ -28,6 +28,16 @@ class StaticMetricBackend:
     def compute_fr_metrics(self, output_video_path, reference_video_path):
         raise AssertionError("registration smoke does not pass a reference video")
 
+    def tool_provenance(self):
+        return {
+            "pyiqa": {"name": "pyiqa", "version": "test"},
+            "dover": {"name": "VQAssessment/DOVER", "commit": "test"},
+            "dover_weights": {"name": "DOVER.pth", "sha256": "test"},
+            "ffmpeg": {"name": "ffmpeg", "version": "test"},
+            "torch": {"name": "torch", "version": "test"},
+            "decord": {"name": "decord", "version": "test"},
+        }
+
 
 def test_seedvr2_analysis_registration_and_contract():
     assert "SeedVR2Canonical" in NODE_CLASS_MAPPINGS
