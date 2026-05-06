@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+build/
+*.egg-info/
+outputs/
+vendor/SeedVR/ckpts/
+vendor/SeedVR/results/
+vendor/SeedVR/**/__pycache__/
