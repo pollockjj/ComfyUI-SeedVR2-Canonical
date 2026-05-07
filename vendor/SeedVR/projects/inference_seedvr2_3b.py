@@ -32,7 +32,21 @@ if os.path.exists("./projects/video_diffusion_sr/color_fix.py"):
 else:
     use_colorfix = False
     print('Note!!!!!! Color fix is not avaliable!')
-from torchvision.transforms import Compose, Lambda, Normalize
+from torchvision.transforms import Compose, Lambda, Normalize, InterpolationMode
+from torchvision.transforms.functional import resize as _tv_resize
+
+
+def _four_x_snap16(x, scale: int = 4, divisor: int = 16):
+    h = x.shape[-2]
+    w = x.shape[-1]
+    th = h * scale
+    tw = w * scale
+    return _tv_resize(
+        x,
+        [th, tw],
+        interpolation=InterpolationMode.BICUBIC,
+        antialias=True,
+    )
 try:
     from torchvision.io.video import read_video
 except ModuleNotFoundError:
@@ -282,17 +296,8 @@ def generation_loop(runner, video_path='./test_videos', output_dir='./results', 
 
     video_transform = Compose(
         [
-            NaResize(
-                resolution=(
-                    res_h * res_w
-                )
-                ** 0.5,
-                mode="area",
-                # Upsample image, model only trained for high res.
-                downsample_only=False,
-            ),
+            Lambda(_four_x_snap16),
             Lambda(lambda x: torch.clamp(x, 0.0, 1.0)),
-            DivisibleCrop((16, 16)),
             Normalize(0.5, 0.5),
             Rearrange("t c h w -> c t h w"),
         ]
